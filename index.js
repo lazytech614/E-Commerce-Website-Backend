@@ -1,7 +1,6 @@
 import express from "express";
 import path, { dirname } from "path";
 import { fileURLToPath } from "url";
-import bodyParser from "body-parser";
 import mongoose from "mongoose";
 import jwt from "jsonwebtoken";
 import multer from "multer";
@@ -10,13 +9,12 @@ import { type } from "os";
 import dotenv from "dotenv";
 import { productSchema } from "./Schemas/ProductSchema.js";
 import { error } from "console";
-
-const __dirname = dirname(fileURLToPath(import.meta.url));
+import { SignUpUserSchema } from "./Schemas/SignUpUserSchema.js";
+import findUser from "./Middlewares/findUser.js";
 
 const app = express();
 const port = 4000;
 
-app.use(bodyParser.urlencoded({ extended: true }));
 app.use(express.json());
 app.use(cors());
 
@@ -48,7 +46,7 @@ const upload = multer({ storage: storage });
 app.use("/images", express.static("upload/images"));
 app.post("/upload", upload.single("product"), async (req, res) => {
   res.json({
-    succes: 1,
+    success: 1,
     image_url: `http://localhost:${port}/images/${req.file.filename}`,
   });
 });
@@ -75,7 +73,6 @@ app.post("/addproduct", async (req, res) => {
       old_price: req.body.old_price,
       sizes: req.body.sizes,
     });
-    console.log(product);
     await product.save();
     console.log("Product saved in the database");
     res.status(200).json({
@@ -114,6 +111,138 @@ app.get("/allproducts", async (req, res) => {
   } catch (err) {
     res.status(500).json({ message: "Cannot get all products", details: err });
   }
+});
+
+// Users schema for sign up
+const Users = mongoose.model("Users", SignUpUserSchema);
+
+// endpoint for user signup
+app.post("/signup", async (req, res) => {
+  const checkEmail = await Users.findOne({ email: req.body.email });
+  const checkPhone = await Users.findOne({ phone: req.body.phone });
+
+  if (checkEmail) {
+    res.status(500).json({ success: false, error: "Email already exist." });
+  } else if (checkPhone) {
+    res
+      .status(500)
+      .json({ success: false, error: "Phone number already exist" });
+  }
+
+  let cart = {};
+  for (let i = 0; i < 20; i++) {
+    cart[i + 1] = 0;
+  }
+
+  const user = new Users({
+    name: req.body.name,
+    email: req.body.email,
+    phone: req.body.phone,
+    gender: req.body.gender,
+    password: req.body.password,
+    cartData: cart,
+  });
+  await user.save();
+
+  const data = {
+    id: user.id,
+  };
+  const token = jwt.sign(data, process.env.VITE_TOKEN_SECRET_KEY);
+  res.json({ success: true, token });
+});
+
+// Endpoint for user signin
+app.post("/signin", async (req, res) => {
+  const user = await Users.findOne({ phone: req.body.phone });
+  if (!user) {
+    console.log("User not found");
+    res.json({ success: false, error: "User not found" });
+  }
+
+  const passwordCompare = user.password === req.body.password;
+  if (passwordCompare) {
+    const data = {
+      id: user.id,
+    };
+    const token = jwt.sign(data, process.env.VITE_TOKEN_SECRET_KEY);
+    res.json({ success: true, token });
+  } else {
+    res.json({ success: false, error: "Wrong password" });
+  }
+});
+
+// Endpoint for new collections
+app.get("/newcollections", async (req, res) => {
+  const products = await Product.find({});
+  const newCollections = products.slice(1).slice(-8);
+  res.send(newCollections);
+});
+
+// Endpoint for popular category women
+app.get("/popular/women", async (req, res) => {
+  const womenProducts = await Product.find({ category: "Women" });
+  const popularProducts = womenProducts.slice(0, 4);
+  res.send(popularProducts);
+});
+
+// Endpoint for popular category men
+app.get("/popular/men", async (req, res) => {
+  const womenProducts = await Product.find({ category: "Men" });
+  const popularProducts = womenProducts.slice(0, 4);
+  res.send(popularProducts);
+});
+
+// Endpoint for popular category kid
+app.get("/popular/kids", async (req, res) => {
+  const womenProducts = await Product.find({ category: "Kid" });
+  const popularProducts = womenProducts.slice(0, 4);
+  res.send(popularProducts);
+});
+
+// Endpoint for women category
+app.get("/women", async (req, res) => {
+  const products = await Product.find({ category: "Women" });
+  res.send(products);
+});
+
+// Endpoint for men category
+app.get("/men", async (req, res) => {
+  const products = await Product.find({ category: "Men" });
+  res.send(products);
+});
+
+// Endpoint for kids category
+app.get("/kids", async (req, res) => {
+  const products = await Product.find({ category: "Kid" });
+  res.send(products);
+});
+
+// Endpoint for adding products to the cart
+app.post("/addtocart", findUser, async (req, res) => {
+  const user = await Users.findById(req.user.id);
+  user.cartData[req.body.itemId] += 1;
+  await Users.findOneAndUpdate(
+    { _id: req.user.id },
+    { cartData: user.cartData }
+  );
+});
+
+// Endpoint for removing product from the cart
+app.post("/removefromcart", findUser, async (req, res) => {
+  const user = await Users.findById(req.user.id);
+  if (user.cartData[req.body.itemId] > 0) user.cartData[req.body.itemId] -= 1;
+  await Users.findOneAndUpdate(
+    { _id: req.user.id },
+    { cartData: user.cartData }
+  );
+});
+
+// Endpoint to get cartData
+app.post("/getcartdata", findUser, async (req, res) => {
+  // console.log(req.user.id);
+  const user = await Users.findOne({ _id: req.user.id });
+  console.log(user.cartData);
+  res.json(user.cartData);
 });
 
 app.listen(port, () => {
