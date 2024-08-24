@@ -13,7 +13,7 @@ import { SignUpUserSchema } from "./Schemas/SignUpUserSchema.js";
 import findUser from "./Middlewares/findUser.js";
 
 const app = express();
-const port = 4000;
+const port = process.env.PORT || 4000;
 
 app.use(express.json());
 app.use(cors());
@@ -74,7 +74,6 @@ app.post("/addproduct", async (req, res) => {
       sizes: req.body.sizes,
     });
     await product.save();
-    console.log("Product saved in the database");
     res.status(200).json({
       success: 1,
       name: req.body.name,
@@ -130,7 +129,7 @@ app.post("/signup", async (req, res) => {
   }
 
   let cart = {};
-  for (let i = 0; i < 20; i++) {
+  for (let i = 0; i < 300; i++) {
     cart[i + 1] = 0;
   }
 
@@ -155,7 +154,6 @@ app.post("/signup", async (req, res) => {
 app.post("/signin", async (req, res) => {
   const user = await Users.findOne({ phone: req.body.phone });
   if (!user) {
-    console.log("User not found");
     res.json({ success: false, error: "User not found" });
   }
 
@@ -225,6 +223,7 @@ app.post("/addtocart", findUser, async (req, res) => {
     { _id: req.user.id },
     { cartData: user.cartData }
   );
+  res.send("added");
 });
 
 // Endpoint for removing product from the cart
@@ -235,13 +234,12 @@ app.post("/removefromcart", findUser, async (req, res) => {
     { _id: req.user.id },
     { cartData: user.cartData }
   );
+  res.send("removed");
 });
 
 // Endpoint to get cartData
 app.post("/getcartdata", findUser, async (req, res) => {
-  // console.log(req.user.id);
   const user = await Users.findOne({ _id: req.user.id });
-  console.log(user.cartData);
   res.json(user.cartData);
 });
 
