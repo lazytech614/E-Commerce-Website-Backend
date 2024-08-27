@@ -16,13 +16,7 @@ const app = express();
 const port = process.env.PORT || 4000;
 
 app.use(express.json());
-app.use(
-  cors({
-    origin: ["http://localhost:5173"],
-    methods: ["POST", "GET"],
-    credentials: true,
-  })
-);
+app.use(cors());
 
 // Database connection with MongoDB
 dotenv.config();
@@ -53,7 +47,9 @@ app.use("/images", express.static("upload/images"));
 app.post("/upload", upload.single("product"), async (req, res) => {
   res.json({
     success: 1,
-    image_url: `https://e-commerce-website-backend-bicr.onrender.com/images/${req.file.filename}`,
+    image_url: `${req.protocol}://${req.get("host")}/images/${
+      req.file.filename
+    }`,
   });
 });
 
