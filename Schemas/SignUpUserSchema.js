@@ -19,7 +19,14 @@ export const SignUpUserSchema = mongoose.Schema({
     type: String,
   },
   cartData: {
-    type: Object,
+    type: [
+      {
+        productId: Number,
+        quantity: Number,
+        size: String,
+      },
+    ],
+    default: [],
   },
   date: {
     type: Date,

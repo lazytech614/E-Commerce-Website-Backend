@@ -11,6 +11,8 @@ import { productSchema } from "./Schemas/ProductSchema.js";
 import { error } from "console";
 import { SignUpUserSchema } from "./Schemas/SignUpUserSchema.js";
 import findUser from "./Middlewares/findUser.js";
+import { orderModel } from "./Models/orderModel.js";
+import Stripe from "stripe";
 
 const app = express();
 const port = process.env.PORT || 4000;
@@ -47,7 +49,7 @@ app.use("/images", express.static("upload/images"));
 app.post("/upload", upload.single("product"), async (req, res) => {
   res.json({
     success: 1,
-    image_url: `https://e-commerce-website-backend-bicr.onrender.com/images/${req.file.filename}`,
+    image_url: `http://localhost:4000/images/${req.file.filename}`,
   });
 });
 
@@ -112,6 +114,18 @@ app.get("/allproducts", async (req, res) => {
   }
 });
 
+const createCart = () => {
+  let cart = [];
+  for (let i = 1; i <= 300; i++) {
+    cart.push({
+      productId: i,
+      quantity: 0,
+      size: "Not selected",
+    });
+  }
+  return cart;
+};
+
 // Users schema for sign up
 const Users = mongoose.model("Users", SignUpUserSchema);
 
@@ -128,10 +142,16 @@ app.post("/signup", async (req, res) => {
       .json({ success: false, error: "Phone number already exist" });
   }
 
-  let cart = {};
-  for (let i = 0; i < 300; i++) {
-    cart[i + 1] = 0;
-  }
+  // let cart = [];
+  // for (let i = 1; i <= 300; i++) {
+  //   cart.push({
+  //     productId: i,
+  //     quantity: 0,
+  //     size: "Not selected",
+  //   });
+  // }
+
+  createCart();
 
   const user = new Users({
     name: req.body.name,
@@ -216,31 +236,159 @@ app.get("/kids", async (req, res) => {
 });
 
 // Endpoint for adding products to the cart
+// app.post("/addtocart", findUser, async (req, res) => {
+//   const { userId, productId, quantity, size } = req.body;
+//   console.log(req.body);
+//   const user = await Users.findById(req.user.id);
+//   const cartData = user.cartData;
+//   user.cartData[req.body.itemId] += 1;
+//   await Users.findOneAndUpdate(
+//     { _id: req.user.id },
+//     { cartData: user.cartData }
+//   );
+//   res.send("added");
+// });
+
 app.post("/addtocart", findUser, async (req, res) => {
-  const user = await Users.findById(req.user.id);
-  user.cartData[req.body.itemId] += 1;
-  await Users.findOneAndUpdate(
-    { _id: req.user.id },
-    { cartData: user.cartData }
-  );
-  res.send("added");
+  const { itemId, size } = req.body;
+
+  try {
+    const user = await Users.findById(req.user.id);
+    let cartData = user.cartData || [];
+
+    const itemIndex = cartData.findIndex((cart) => itemId === cart.productId);
+
+    if (itemIndex !== -1) {
+      // Item exists in cart
+      cartData[itemIndex].quantity += 1;
+      cartData[itemIndex].size = size;
+    } else {
+      // Item does not exist, add new item
+      cartData.push({
+        productId: itemId,
+        quantity: 1,
+        size: size,
+      });
+    }
+
+    await Users.findOneAndUpdate({ _id: req.user.id }, { cartData: cartData });
+
+    // Ensure cartData is an array
+    if (!Array.isArray(cartData)) {
+      throw new Error("Cart data is not an array");
+    }
+
+    res.json({
+      success: true,
+      message: "Item added to cart successfully",
+      cartData,
+    });
+  } catch (err) {
+    console.error("Error adding item to cart:", err);
+    res.status(500).json({
+      success: false,
+      message: "Error adding item to cart",
+      error: err.message,
+    });
+  }
 });
 
 // Endpoint for removing product from the cart
 app.post("/removefromcart", findUser, async (req, res) => {
-  const user = await Users.findById(req.user.id);
-  if (user.cartData[req.body.itemId] > 0) user.cartData[req.body.itemId] -= 1;
-  await Users.findOneAndUpdate(
-    { _id: req.user.id },
-    { cartData: user.cartData }
-  );
-  res.send("removed");
+  const { itemId } = req.body;
+
+  try {
+    const user = await Users.findById(req.user.id);
+    const cartData = user.cartData;
+
+    const item = cartData.find((cart) => itemId === cart.productId);
+
+    if (item) {
+      item.quantity -= 1;
+    }
+    // if (user.cartData[req.body.itemId] > 0) user.cartData[req.body.itemId] -= 1;
+    await Users.findOneAndUpdate({ _id: req.user.id }, { cartData: cartData });
+
+    res.json({
+      success: true,
+      message: "Item removed from cart successfully",
+      cartData,
+    });
+  } catch (err) {
+    console.error("Error removing the item from cart:", err);
+    res.status(500).json({
+      success: false,
+      message: "Error removing the item from cart",
+      error: err.message,
+    });
+  }
 });
 
 // Endpoint to get cartData
 app.post("/getcartdata", findUser, async (req, res) => {
   const user = await Users.findOne({ _id: req.user.id });
   res.json(user.cartData);
+});
+
+// Endpoint for payment
+
+const stripe = new Stripe(process.env.STRIPE_SECRET_KEY);
+
+app.post("/payment", findUser, async (req, res) => {
+  const frontendURL = "http://localhost:5173";
+  console.log(req.body);
+  try {
+    const user = await Users.findOne({ _id: req.user.id });
+    const userId = user.id;
+    const newOrder = new orderModel({
+      userId: userId,
+      items: req.body.items,
+      amount: req.body.total,
+      address: {
+        street: `${req.body.street}`,
+        city: `${req.body.city}`,
+        pinCode: `${req.body.pinCode}`,
+        state: `${req.body.state}`,
+        country: `${req.body.country}`,
+      },
+    });
+
+    await newOrder.save();
+    await Users.findByIdAndUpdate(req.user.id, { cartData: createCart() });
+
+    // const lineItems = req.body.items.map((item) => ({
+    //   priceData: {
+    //     currency: "inr",
+    //     productData: {
+    //       productId: item.productId,
+    //     },
+    //     unitAmount: 100 * item.quantity * 80,
+    //   },
+    //   quantity: item.quantity,
+    // }));
+
+    // lineItems.push({
+    //   priceData: {
+    //     currency: "inr",
+    //     productData: {
+    //       name: "Delivery charge",
+    //     },
+    //     unitAmount: 2 * 80,
+    //   },
+    //   quantity: 1,
+    // });
+
+    // const session = await stripe.checkout.sessions.create({
+    //   lineItems: lineItems,
+    //   mode: "payment",
+    //   successURL: `${frontendURL}/verify?success=true&orderId=${newOrder._id}`,
+    //   cancelURL: `${frontendURL}/verify?success=false&orderId=${newOrder._id}`,
+    // });
+
+    res.status(200).json({ success: 1 });
+  } catch (err) {
+    console.log(err);
+  }
 });
 
 app.listen(port, () => {
