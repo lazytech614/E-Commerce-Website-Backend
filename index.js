@@ -235,20 +235,6 @@ app.get("/kids", async (req, res) => {
   res.send(products);
 });
 
-// Endpoint for adding products to the cart
-// app.post("/addtocart", findUser, async (req, res) => {
-//   const { userId, productId, quantity, size } = req.body;
-//   console.log(req.body);
-//   const user = await Users.findById(req.user.id);
-//   const cartData = user.cartData;
-//   user.cartData[req.body.itemId] += 1;
-//   await Users.findOneAndUpdate(
-//     { _id: req.user.id },
-//     { cartData: user.cartData }
-//   );
-//   res.send("added");
-// });
-
 app.post("/addtocart", findUser, async (req, res) => {
   const { itemId, size } = req.body;
 
@@ -335,60 +321,27 @@ app.post("/getcartdata", findUser, async (req, res) => {
 const stripe = new Stripe(process.env.STRIPE_SECRET_KEY);
 
 app.post("/payment", findUser, async (req, res) => {
-  const frontendURL = "http://localhost:5173";
-  console.log(req.body);
-  try {
-    const user = await Users.findOne({ _id: req.user.id });
-    const userId = user.id;
-    const newOrder = new orderModel({
-      userId: userId,
-      items: req.body.items,
-      amount: req.body.total,
-      address: {
-        street: `${req.body.street}`,
-        city: `${req.body.city}`,
-        pinCode: `${req.body.pinCode}`,
-        state: `${req.body.state}`,
-        country: `${req.body.country}`,
+  const { products } = req.body;
+
+  const line_items = products.map((product) => ({
+    price_data: {
+      currency: "inr",
+      product_data: {
+        name: product.name,
       },
-    });
+      unit_amount: product.price * 100,
+    },
+    quantity: product.quantity || 1,
+  }));
 
-    await newOrder.save();
-    await Users.findByIdAndUpdate(req.user.id, { cartData: createCart() });
+  const session = await stripe.checkout.sessions.create({
+    line_items: line_items,
+    mode: "payment",
+    success_url: "http://localhost:5173/success",
+    cancel_url: "http://localhost:5173/cancel",
+  });
 
-    // const lineItems = req.body.items.map((item) => ({
-    //   priceData: {
-    //     currency: "inr",
-    //     productData: {
-    //       productId: item.productId,
-    //     },
-    //     unitAmount: 100 * item.quantity * 80,
-    //   },
-    //   quantity: item.quantity,
-    // }));
-
-    // lineItems.push({
-    //   priceData: {
-    //     currency: "inr",
-    //     productData: {
-    //       name: "Delivery charge",
-    //     },
-    //     unitAmount: 2 * 80,
-    //   },
-    //   quantity: 1,
-    // });
-
-    // const session = await stripe.checkout.sessions.create({
-    //   lineItems: lineItems,
-    //   mode: "payment",
-    //   successURL: `${frontendURL}/verify?success=true&orderId=${newOrder._id}`,
-    //   cancelURL: `${frontendURL}/verify?success=false&orderId=${newOrder._id}`,
-    // });
-
-    res.status(200).json({ success: 1 });
-  } catch (err) {
-    console.log(err);
-  }
+  res.json({ id: session.id });
 });
 
 app.listen(port, () => {
